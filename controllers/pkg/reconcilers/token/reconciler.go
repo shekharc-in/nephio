@@ -21,10 +21,11 @@ import (
 	"fmt"
 	"reflect"
 
-	"code.gitea.io/sdk/gitea"
 	commonv1alpha1 "github.com/nephio-project/api/common/v1alpha1"
 	infrav1alpha1 "github.com/nephio-project/api/infra/v1alpha1"
-	"github.com/nephio-project/nephio/controllers/pkg/giteaclient"
+	git "github.com/nephio-project/nephio/controllers/pkg/git"
+	giteaclient "github.com/nephio-project/nephio/controllers/pkg/git/gitea"
+	"github.com/nephio-project/nephio/controllers/pkg/git/types"
 	ctrlconfig "github.com/nephio-project/nephio/controllers/pkg/reconcilers/config"
 	reconcilerinterface "github.com/nephio-project/nephio/controllers/pkg/reconcilers/reconciler-interface"
 	"github.com/nephio-project/nephio/controllers/pkg/resource"
@@ -54,13 +55,13 @@ const (
 // SetupWithManager sets up the controller with the Manager.
 func (r *reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, c interface{}) (map[schema.GroupVersionKind]chan event.GenericEvent, error) {
 	cfg, ok := c.(*ctrlconfig.ControllerConfig)
-	// Sending the porchclient to gitea, this will be used to get
-	// the secret objects for gitea client authentication. The client
+	// Sending the porchclient to git, this will be used to get
+	// the secret objects for git client authentication. The client
 	// of the manager of this controller cannot be used at this point.
 	// Should this be conditional ? Only if we have repo/token reconciler
 
 	var e error
-	r.giteaClient, e = giteaclient.GetClient(ctx, resource.NewAPIPatchingApplicator(cfg.PorchClient))
+	r.gitClient, e = giteaclient.GetClient(ctx, resource.NewAPIPatchingApplicator(cfg.PorchClient))
 	if e != nil {
 		return nil, e
 	}
@@ -84,8 +85,8 @@ func (r *reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, c i
 
 type reconciler struct {
 	resource.APIPatchingApplicator
-	giteaClient giteaclient.GiteaClient
-	finalizer   *resource.APIFinalizer
+	gitClient git.Client
+	finalizer *resource.APIFinalizer
 }
 
 func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -103,8 +104,8 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// check if client exists otherwise retry
-	if !r.giteaClient.IsInitialized() {
-		err := fmt.Errorf("gitea server unreachable")
+	if !r.gitClient.IsInitialized() {
+		err := fmt.Errorf("git server unreachable")
 		log.Error(err, "cannot connect to git server")
 		cr.SetConditions(infrav1alpha1.Failed(err.Error()))
 		return ctrl.Result{Requeue: true}, errors.Wrap(r.Status().Update(ctx, cr), errUpdateStatus)
@@ -116,7 +117,7 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// Delete the token from the git server
 		// when successful remove the finalizer
 		if cr.Spec.Lifecycle.DeletionPolicy == commonv1alpha1.DeletionDelete {
-			if err := r.deleteToken(ctx, r.giteaClient, cr); err != nil {
+			if err := r.deleteToken(ctx, r.gitClient, cr); err != nil {
 				log.Error(err, "cannot delete token in git server")
 				return ctrl.Result{Requeue: true}, errors.Wrap(r.Status().Update(ctx, cr), errUpdateStatus)
 			}
@@ -140,16 +141,16 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// create token and secret
-	if err := r.createToken(ctx, r.giteaClient, cr); err != nil {
+	if err := r.createToken(ctx, r.gitClient, cr); err != nil {
 		return ctrl.Result{Requeue: true}, errors.Wrap(r.Status().Update(ctx, cr), errUpdateStatus)
 	}
 	cr.SetConditions(infrav1alpha1.Ready())
 	return ctrl.Result{}, errors.Wrap(r.Status().Update(ctx, cr), errUpdateStatus)
 }
 
-func (r *reconciler) createToken(ctx context.Context, giteaClient giteaclient.GiteaClient, cr *infrav1alpha1.Token) error {
+func (r *reconciler) createToken(ctx context.Context, gitClient git.Client, cr *infrav1alpha1.Token) error {
 	log := log.FromContext(ctx)
-	tokens, _, err := giteaClient.ListAccessTokens(gitea.ListAccessTokensOptions{})
+	tokens, _, err := gitClient.ListAccessTokens(types.ListAccessTokensOptions{})
 	if err != nil {
 		log.Error(err, "cannot list tokens")
 		cr.SetConditions(infrav1alpha1.Failed(err.Error()))
@@ -163,17 +164,17 @@ func (r *reconciler) createToken(ctx context.Context, giteaClient giteaclient.Gi
 		}
 	}
 	if !tokenFound {
-		u, _, err := giteaClient.GetMyUserInfo()
+		u, _, err := gitClient.GetMyUserInfo()
 		if err != nil {
 			log.Error(err, "cannot get user info")
 			cr.SetConditions(infrav1alpha1.Failed(err.Error()))
 			return err
 		}
 
-		token, _, err := giteaClient.CreateAccessToken(gitea.CreateAccessTokenOption{
+		token, _, err := gitClient.CreateAccessToken(types.CreateAccessTokenOption{
 			Name: cr.GetTokenName(),
-			Scopes: []gitea.AccessTokenScope{
-				gitea.AccessTokenScopeRepo,
+			Scopes: []types.AccessTokenScope{
+				types.AccessTokenScopeRepo,
 			},
 		})
 		if err != nil {
@@ -218,8 +219,8 @@ func (r *reconciler) createToken(ctx context.Context, giteaClient giteaclient.Gi
 	return nil
 }
 
-func (r *reconciler) deleteToken(ctx context.Context, giteaClient giteaclient.GiteaClient, cr *infrav1alpha1.Token) error {
-	_, err := giteaClient.DeleteAccessToken(cr.GetTokenName())
+func (r *reconciler) deleteToken(ctx context.Context, gitClient git.Client, cr *infrav1alpha1.Token) error {
+	_, err := gitClient.DeleteAccessToken(cr.GetTokenName())
 	if err != nil {
 		log.FromContext(ctx).Error(err, "cannot delete token")
 		cr.SetConditions(infrav1alpha1.Failed(err.Error()))

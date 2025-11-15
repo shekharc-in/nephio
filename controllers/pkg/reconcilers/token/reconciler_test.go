@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"testing"
 
-	"code.gitea.io/sdk/gitea"
-
 	infrav1alpha1 "github.com/nephio-project/api/infra/v1alpha1"
-	"github.com/nephio-project/nephio/controllers/pkg/giteaclient"
-	"github.com/nephio-project/nephio/controllers/pkg/mocks/external/client"
+	git "github.com/nephio-project/nephio/controllers/pkg/git"
+	"github.com/nephio-project/nephio/controllers/pkg/git/types"
+
+	mocks "github.com/nephio-project/nephio/controllers/pkg/mocks/external/client"
 	"github.com/nephio-project/nephio/controllers/pkg/resource"
 	"github.com/nephio-project/nephio/testing/mockeryutils"
 	"github.com/stretchr/testify/mock"
@@ -33,13 +33,13 @@ import (
 
 type fields struct {
 	APIPatchingApplicator resource.APIPatchingApplicator
-	giteaClient           giteaclient.GiteaClient
+	gitClient             git.Client
 	finalizer             *resource.APIFinalizer
 }
 type args struct {
-	ctx         context.Context
-	giteaClient giteaclient.GiteaClient
-	cr          *infrav1alpha1.Token
+	ctx       context.Context
+	gitClient git.Client
+	cr        *infrav1alpha1.Token
 }
 type tokenTests struct {
 	name    string
@@ -78,13 +78,13 @@ func TestDeleteToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &reconciler{
 				APIPatchingApplicator: tt.fields.APIPatchingApplicator,
-				giteaClient:           tt.fields.giteaClient,
+				gitClient:             tt.fields.gitClient,
 				finalizer:             tt.fields.finalizer,
 			}
 
 			initMockeryMocks(&tt)
 
-			if err := r.deleteToken(tt.args.ctx, tt.args.giteaClient, tt.args.cr); (err != nil) != tt.wantErr {
+			if err := r.deleteToken(tt.args.ctx, tt.args.gitClient, tt.args.cr); (err != nil) != tt.wantErr {
 				t.Errorf("deleteToken() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -104,7 +104,7 @@ func TestCreateToken(t *testing.T) {
 			args:   args{nil, nil, &infrav1alpha1.Token{}},
 			mocks: []mockeryutils.MockHelper{
 				{MethodName: "ListAccessTokens",
-					ArgType:    []string{"gitea.ListAccessTokensOptions"},
+					ArgType:    []string{"git.ListAccessTokensOptions"},
 					RetArgList: []interface{}{nil, nil, fmt.Errorf("\"username\" not set: only BasicAuth allowed")}},
 			},
 			wantErr: true,
@@ -122,8 +122,8 @@ func TestCreateToken(t *testing.T) {
 				}}},
 			mocks: []mockeryutils.MockHelper{
 				{MethodName: "ListAccessTokens",
-					ArgType: []string{"gitea.ListAccessTokensOptions"},
-					RetArgList: []interface{}{[]*gitea.AccessToken{
+					ArgType: []string{"git.ListAccessTokensOptions"},
+					RetArgList: []interface{}{[]*types.AccessToken{
 						{ID: 123,
 							Name: "test-token-test-ns"},
 					}, nil, nil}},
@@ -136,8 +136,8 @@ func TestCreateToken(t *testing.T) {
 			args:   args{nil, nil, &infrav1alpha1.Token{}},
 			mocks: []mockeryutils.MockHelper{
 				{MethodName: "ListAccessTokens",
-					ArgType: []string{"gitea.ListAccessTokensOptions"},
-					RetArgList: []interface{}{[]*gitea.AccessToken{
+					ArgType: []string{"git.ListAccessTokensOptions"},
+					RetArgList: []interface{}{[]*types.AccessToken{
 						{ID: 123,
 							Name: "test-token-test-ns"},
 					}, nil, nil}},
@@ -151,15 +151,15 @@ func TestCreateToken(t *testing.T) {
 			args:   args{nil, nil, &infrav1alpha1.Token{}},
 			mocks: []mockeryutils.MockHelper{
 				{MethodName: "ListAccessTokens",
-					ArgType: []string{"gitea.ListAccessTokensOptions"},
-					RetArgList: []interface{}{[]*gitea.AccessToken{
+					ArgType: []string{"git.ListAccessTokensOptions"},
+					RetArgList: []interface{}{[]*types.AccessToken{
 						{ID: 123,
 							Name: "test-token-test-ns"},
 					}, nil, nil}},
-				{MethodName: "GetMyUserInfo", ArgType: []string{}, RetArgList: []interface{}{&gitea.User{UserName: "gitea"}, nil, nil}},
+				{MethodName: "GetMyUserInfo", ArgType: []string{}, RetArgList: []interface{}{&types.User{UserName: "gitea"}, nil, nil}},
 				{MethodName: "CreateAccessToken",
-					ArgType:    []string{"gitea.CreateAccessTokenOption"},
-					RetArgList: []interface{}{&gitea.AccessToken{}, nil, fmt.Errorf("failed to create token")}},
+					ArgType:    []string{"git.CreateAccessTokenOption"},
+					RetArgList: []interface{}{&types.AccessToken{}, nil, fmt.Errorf("failed to create token")}},
 			},
 			wantErr: true,
 		},
@@ -175,11 +175,11 @@ func TestCreateToken(t *testing.T) {
 					Name:      "test-token",
 				}}},
 			mocks: []mockeryutils.MockHelper{
-				{MethodName: "ListAccessTokens", ArgType: []string{"gitea.ListAccessTokensOptions"}, RetArgList: []interface{}{[]*gitea.AccessToken{}, nil, nil}},
-				{MethodName: "GetMyUserInfo", ArgType: []string{}, RetArgList: []interface{}{&gitea.User{UserName: "gitea"}, nil, nil}},
+				{MethodName: "ListAccessTokens", ArgType: []string{"git.ListAccessTokensOptions"}, RetArgList: []interface{}{[]*types.AccessToken{}, nil, nil}},
+				{MethodName: "GetMyUserInfo", ArgType: []string{}, RetArgList: []interface{}{&types.User{UserName: "gitea"}, nil, nil}},
 				{MethodName: "CreateAccessToken",
-					ArgType: []string{"gitea.CreateAccessTokenOption"},
-					RetArgList: []interface{}{&gitea.AccessToken{ID: 123,
+					ArgType: []string{"git.CreateAccessTokenOption"},
+					RetArgList: []interface{}{&types.AccessToken{ID: 123,
 						Name: "test-token-test-ns"}, nil, nil}},
 			},
 			wantErr: false,
@@ -189,13 +189,13 @@ func TestCreateToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &reconciler{
 				APIPatchingApplicator: tt.fields.APIPatchingApplicator,
-				giteaClient:           tt.fields.giteaClient,
+				gitClient:             tt.fields.gitClient,
 				finalizer:             tt.fields.finalizer,
 			}
 
 			initMockeryMocks(&tt)
 
-			if err := r.createToken(tt.args.ctx, tt.args.giteaClient, tt.args.cr); (err != nil) != tt.wantErr {
+			if err := r.createToken(tt.args.ctx, tt.args.gitClient, tt.args.cr); (err != nil) != tt.wantErr {
 				t.Errorf("createToken() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -203,8 +203,8 @@ func TestCreateToken(t *testing.T) {
 }
 
 func initMockeryMocks(tt *tokenTests) {
-	mockGiteaClient := new(giteaclient.MockGiteaClient)
-	tt.args.giteaClient = mockGiteaClient
-	tt.fields.giteaClient = mockGiteaClient
-	mockeryutils.InitMocks(&mockGiteaClient.Mock, tt.mocks)
+	mockGitClient := new(git.MockClient)
+	tt.args.gitClient = mockGitClient
+	tt.fields.gitClient = mockGitClient
+	mockeryutils.InitMocks(&mockGitClient.Mock, tt.mocks)
 }

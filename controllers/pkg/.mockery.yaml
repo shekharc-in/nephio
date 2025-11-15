@@ -5,6 +5,11 @@ packages:
       GiteaClient:
         config:
           dir: "{{.InterfaceDir}}"
+  github.com/nephio-project/nephio/controllers/pkg/git:
+    interfaces:
+      Client:
+        config:
+          dir: "{{.InterfaceDir}}"
   sigs.k8s.io/controller-runtime/pkg/client:
     interfaces:
       Client:
